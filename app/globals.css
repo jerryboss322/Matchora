@@ -1,0 +1,187 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Design Token System
+  ─────────────────────────────────────────────────────────────────────────────
+  Palette: Deep navy background, cool slate panels, electric teal accent,
+           amber confidence indicator, crisp white type hierarchy.
+  
+  The aesthetic: a quantitative football analytics terminal.
+  Inspired by Bloomberg terminal data density meets modern data journalism.
+*/
+
+@layer base {
+  :root {
+    /* Surfaces */
+    --surface-base: #0a0e1a;       /* near-black navy — main background */
+    --surface-panel: #111827;      /* card / panel background */
+    --surface-elevated: #1a2235;   /* elevated elements, dropdowns */
+    --surface-border: #1e2d42;     /* borders and dividers */
+    --surface-hover: #1f2f47;      /* hover state for interactive items */
+
+    /* Text */
+    --text-primary: #e8edf5;       /* primary content */
+    --text-secondary: #7e93b0;     /* labels, meta, secondary */
+    --text-tertiary: #4a5e78;      /* placeholders, disabled */
+    --text-inverse: #0a0e1a;       /* text on bright backgrounds */
+
+    /* Accent: electric teal */
+    --accent-primary: #00c2a8;     /* CTAs, active states, links */
+    --accent-primary-dim: #00a08a; /* hover on accent */
+    --accent-glow: rgba(0, 194, 168, 0.12); /* subtle glow background */
+
+    /* Confidence tier colors */
+    --conf-high: #22c55e;          /* >=70% — green */
+    --conf-high-bg: rgba(34, 197, 94, 0.08);
+    --conf-medium: #f59e0b;        /* 50–69% — amber */
+    --conf-medium-bg: rgba(245, 158, 11, 0.08);
+    --conf-low: #ef4444;           /* <50% — red */
+    --conf-low-bg: rgba(239, 68, 68, 0.08);
+
+    /* Status */
+    --status-live: #ef4444;
+    --status-scheduled: #00c2a8;
+    --status-finished: #4a5e78;
+
+    /* Typography */
+    --font-display: var(--font-inter), system-ui, sans-serif;
+    --font-data: var(--font-mono), "Fira Code", monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--surface-base);
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    line-height: 1.6;
+  }
+
+  /* Custom scrollbar — minimal, dark */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--surface-base);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--surface-border);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+  }
+}
+
+@layer components {
+  /* ─── Panel ──────────────────────────────────────────────────────────────── */
+  .panel {
+    background-color: var(--surface-panel);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+  }
+
+  .panel-elevated {
+    background-color: var(--surface-elevated);
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+  }
+
+  /* ─── Data label ─────────────────────────────────────────────────────────── */
+  .data-label {
+    font-family: var(--font-data);
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  .data-value {
+    font-family: var(--font-data);
+    font-size: 1rem;
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  /* ─── Confidence badge ───────────────────────────────────────────────────── */
+  .conf-badge {
+    font-family: var(--font-data);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.04em;
+  }
+
+  .conf-badge-high {
+    color: var(--conf-high);
+    background: var(--conf-high-bg);
+  }
+
+  .conf-badge-medium {
+    color: var(--conf-medium);
+    background: var(--conf-medium-bg);
+  }
+
+  .conf-badge-low {
+    color: var(--conf-low);
+    background: var(--conf-low-bg);
+  }
+
+  /* ─── Status dot ─────────────────────────────────────────────────────────── */
+  .status-live {
+    color: var(--status-live);
+  }
+
+  .status-scheduled {
+    color: var(--status-scheduled);
+  }
+
+  .status-finished {
+    color: var(--status-finished);
+  }
+
+  /* ─── Skeleton loader ────────────────────────────────────────────────────── */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--surface-panel) 25%,
+      var(--surface-elevated) 50%,
+      var(--surface-panel) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ─── Confidence bar ─────────────────────────────────────────────────────── */
+  .conf-bar-track {
+    height: 4px;
+    background: var(--surface-elevated);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .conf-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease;
+  }
+}
