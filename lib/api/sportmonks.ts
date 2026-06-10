@@ -159,13 +159,18 @@ function mapToResult(f: SMFixture): MatchResult | null {
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Fetch today's fixtures from Sportmonks.
- * Uses the /fixtures/date/:date endpoint with participants and scores includes.
+ * Fetch fixtures from Sportmonks across a date range (default: 3-day window).
+ * Uses the /fixtures/between/:from/:to endpoint.
  */
-export async function getTodaysFixturesSM(): Promise<Fixture[]> {
-  const today = new Date().toISOString().split("T")[0];
+export async function getTodaysFixturesSM(daysAhead = 2): Promise<Fixture[]> {
+  const today = new Date();
+  const dateFrom = today.toISOString().split("T")[0];
+  const dateTo = new Date(today.getTime() + daysAhead * 86_400_000)
+    .toISOString()
+    .split("T")[0];
+
   const data = await sportmonksFetch<SMFixturesResponse>(
-    `/fixtures/date/${today}?include=participants;scores;state;league;venue`
+    `/fixtures/between/${dateFrom}/${dateTo}?include=participants;scores;state;league;venue`
   );
 
   return (data.data ?? [])

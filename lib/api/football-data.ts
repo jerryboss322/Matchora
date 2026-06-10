@@ -190,13 +190,17 @@ function mapMatchToResult(match: FDMatch): MatchResult | null {
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Fetch today's fixtures across all supported competitions.
- * Filters to SCHEDULED and IN_PLAY matches only.
+ * Fetch fixtures across a date range (default: today + next 2 days = 3-day window).
+ * Filters to SCHEDULED, IN_PLAY, and TIMED matches only.
  */
-export async function getTodaysFixtures(): Promise<Fixture[]> {
-  const today = new Date().toISOString().split("T")[0];
+export async function getTodaysFixtures(daysAhead = 2): Promise<Fixture[]> {
+  const today = new Date();
+  const dateFrom = today.toISOString().split("T")[0];
+  const dateTo = new Date(today.getTime() + daysAhead * 86_400_000)
+    .toISOString()
+    .split("T")[0];
   const data = await footballDataFetch<FDMatchesResponse>(
-    `/matches?dateFrom=${today}&dateTo=${today}&status=SCHEDULED,IN_PLAY,PAUSED,TIMED`
+    `/matches?dateFrom=${dateFrom}&dateTo=${dateTo}&status=SCHEDULED,IN_PLAY,PAUSED,TIMED`
   );
   return data.matches.map(mapMatch);
 }
