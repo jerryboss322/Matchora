@@ -12,6 +12,7 @@ import type { ApiResponse, SystemHealth, ProviderStatus } from "@/types";
 import { pingFootballData } from "@/lib/api/football-data";
 import { pingOddsApi } from "@/lib/api/odds-api";
 import { pingSpportmonks } from "@/lib/api/sportmonks";
+import { pingStatsApi } from "@/lib/api/stats-api";
 
 export const runtime = "nodejs";
 export const revalidate = 0; // always fresh
@@ -19,10 +20,11 @@ export const revalidate = 0; // always fresh
 export async function GET(): Promise<NextResponse<ApiResponse<SystemHealth>>> {
   const checkedAt = new Date().toISOString();
 
-  const [fdReachable, oddsReachable, smReachable] = await Promise.all([
+  const [fdReachable, oddsReachable, smReachable, statsReachable] = await Promise.all([
     pingFootballData().catch(() => false),
     pingOddsApi().catch(() => false),
     pingSpportmonks().catch(() => false),
+    pingStatsApi().catch(() => false),
   ]);
 
   const providers: ProviderStatus[] = [
@@ -54,6 +56,16 @@ export async function GET(): Promise<NextResponse<ApiResponse<SystemHealth>>> {
       lastChecked: checkedAt,
       ...(!process.env.SPORTMONKS_API_KEY && {
         error: "SPORTMONKS_API_KEY environment variable not set",
+      }),
+    },
+    {
+      name: "Stats API (RapidAPI)",
+      key: "stats-api",
+      configured: Boolean(process.env.STATS_API_KEY),
+      reachable: statsReachable,
+      lastChecked: checkedAt,
+      ...(!process.env.STATS_API_KEY && {
+        error: "STATS_API_KEY environment variable not set",
       }),
     },
   ];

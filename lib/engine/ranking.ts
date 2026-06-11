@@ -93,7 +93,7 @@ export function assessDataQuality(params: {
     : 0;
 
   return {
-    overallScore: Math.max(0.3, Math.min(1.0, score)), // floor at 0.3
+    overallScore: Math.max(0.1, Math.min(1.0, score)), // floor at 0.1 (below 0.4 = no prediction)
     hasForm,
     hasVenueForm,
     hasH2H,
@@ -107,10 +107,33 @@ export function assessDataQuality(params: {
 
 /**
  * Determine if a fixture has enough data to make any predictions.
- * Requires at minimum: form data for both teams.
+ * Requires at least 2 available signals out of: form, H2H, standings, odds.
+ * This allows international fixtures (World Cup, friendlies) with partial data
+ * to still generate predictions at reduced confidence.
  */
 export function canGeneratePredictions(quality: DataQualityReport): boolean {
-  return quality.hasForm && quality.formSampleSize >= 3;
+  const availableSignals = [
+    quality.hasForm,
+    quality.hasH2H,
+    quality.hasStandings,
+    quality.hasOdds,
+  ].filter(Boolean).length;
+
+  // Hard floor: if overall quality is too low, skip entirely
+  if (quality.overallScore < 0.40) return false;
+
+  return availableSignals >= 2;
+}
+
+/**
+ * Derive a confidence tier label from data quality score.
+ */
+export function confidenceTier(
+  overallScore: number
+): "high" | "medium" | "low" {
+  if (overallScore >= 0.8) return "high";
+  if (overallScore >= 0.6) return "medium";
+  return "low";
 }
 
 /**

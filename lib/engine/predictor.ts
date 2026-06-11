@@ -22,7 +22,7 @@ import {
 import { getUpcomingSoccerOdds, matchFixtureToOdds } from "@/lib/api/odds-api";
 import { computeTeamForm, computeVenueForm } from "@/lib/engine/form";
 import { computeH2H } from "@/lib/engine/h2h";
-import { generateAllPredictions } from "@/lib/engine/confidence";
+import { generateAllPredictions, PublicEngineInput } from "@/lib/engine/confidence";
 import { assessDataQuality, canGeneratePredictions, rankPredictions } from "@/lib/engine/ranking";
 
 /**
@@ -124,8 +124,8 @@ export async function predictFixture(
 
   const allPredictions = generateAllPredictions(
     {
-      homeForm: homeForm!,
-      awayForm: awayForm!,
+      homeForm: homeForm,
+      awayForm: awayForm,
       homeVenueForm,
       awayVenueForm,
       h2h,

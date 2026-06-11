@@ -32,6 +32,7 @@ import {
 } from "./form";
 import { h2hConsistencyFactor } from "./h2h";
 
+/** Internal engine input — form is always resolved (never null). */
 interface EngineInput {
   homeForm: TeamFormStats;
   awayForm: TeamFormStats;
@@ -43,6 +44,45 @@ interface EngineInput {
   odds: FixtureOdds | null;
   dataQuality: DataQualityReport;
 }
+
+/** Public input accepted by generateAllPredictions — form may be null. */
+export interface PublicEngineInput {
+  homeForm: TeamFormStats | null;
+  awayForm: TeamFormStats | null;
+  homeVenueForm: VenueFormStats | null;
+  awayVenueForm: VenueFormStats | null;
+  h2h: HeadToHeadStats | null;
+  homeStanding: StandingEntry | null;
+  awayStanding: StandingEntry | null;
+  odds: FixtureOdds | null;
+  dataQuality: DataQualityReport;
+}
+
+/**
+ * Neutral fallback form stats used when real form is unavailable.
+ * Represents a 50/50 team — adds minimal signal, reduces confidence via dataQuality.
+ */
+const NEUTRAL_FORM: TeamFormStats = {
+  teamId: 0,
+  teamName: "Unknown",
+  played: 0,
+  wins: 0,
+  draws: 0,
+  losses: 0,
+  goalsScored: 0,
+  goalsConceded: 0,
+  cleanSheets: 0,
+  failedToScore: 0,
+  avgGoalsScored: 1.2,   // league average approximation
+  avgGoalsConceded: 1.2,
+  winRate: 0.33,
+  drawRate: 0.27,
+  lossRate: 0.40,
+  bttsRate: 0.45,
+  over15Rate: 0.60,
+  over25Rate: 0.45,
+  over35Rate: 0.25,
+};
 
 // ─── Standing-based relative strength ─────────────────────────────────────────
 
@@ -594,17 +634,25 @@ function evaluateDoubleChance(
  * Returns unranked predictions — caller is responsible for ranking.
  */
 export function generateAllPredictions(
-  input: EngineInput,
+  input: PublicEngineInput,
   tableSize = 20
 ): MarketPrediction[] {
+  // Resolve null form to neutral fallback so evaluators always have stats to work with.
+  // The dataQuality.overallScore already penalizes confidence for missing data.
+  const resolved: EngineInput = {
+    ...input,
+    homeForm: input.homeForm ?? NEUTRAL_FORM,
+    awayForm: input.awayForm ?? NEUTRAL_FORM,
+  };
+
   return [
-    evaluateOver05(input),
-    evaluateOver15(input),
-    evaluateUnder45(input),
-    evaluateUnder55(input),
-    evaluateHomeOver05(input),
-    evaluateAwayOver05(input),
-    ...evaluateDoubleChance(input, tableSize),
+    evaluateOver05(resolved),
+    evaluateOver15(resolved),
+    evaluateUnder45(resolved),
+    evaluateUnder55(resolved),
+    evaluateHomeOver05(resolved),
+    evaluateAwayOver05(resolved),
+    ...evaluateDoubleChance(resolved, tableSize),
   ];
 }
 

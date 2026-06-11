@@ -197,6 +197,16 @@ export default async function SettingsPage() {
                 required: true,
               },
               {
+                key: "STATS_API_KEY",
+                desc: "RapidAPI key for match statistics — obtain at rapidapi.com",
+                required: true,
+              },
+              {
+                key: "STATS_API_HOST",
+                desc: "RapidAPI host for stats (default: api-football-v1.p.rapidapi.com)",
+                required: false,
+              },
+              {
                 key: "NEXT_PUBLIC_BASE_URL",
                 desc: "Full URL of your deployment (e.g. https://matchora.vercel.app)",
                 required: true,

@@ -248,3 +248,29 @@ export interface SystemHealth {
   providers: ProviderStatus[];
   checkedAt: string;
 }
+
+// ─── Match Statistics (from Stats API) ────────────────────────────────────────
+
+export interface MatchStatGroup {
+  title: string;
+  key: string;
+  stats: MatchStatItem[];
+}
+
+export interface MatchStatItem {
+  title: string;
+  key: string;
+  home: string | number | null;
+  away: string | number | null;
+  highlighted: "home" | "away" | "equal";
+  type: "text" | "graph" | "title";
+  format?: "integer" | "double" | "integerWithPercentage" | "distance";
+}
+
+export interface FixtureStats {
+  fixtureId: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  groups: MatchStatGroup[];
+  fetchedAt: string;
+}

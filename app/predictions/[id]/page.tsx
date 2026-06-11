@@ -177,12 +177,13 @@ export default async function PredictionPage({ params }: Props) {
         </div>
       )}
 
-      {/* Cannot predict */}
+      {/* Cannot predict — truly no data */}
       {!prediction.canPredict && (
         <div
           className="panel p-8 text-center mb-8"
           style={{ borderColor: "var(--surface-border)" }}
         >
+          <p className="text-2xl mb-3">📊</p>
           <p
             className="font-semibold text-base mb-2"
             style={{ color: "var(--text-secondary)" }}
@@ -190,8 +191,33 @@ export default async function PredictionPage({ params }: Props) {
             Prediction unavailable
           </p>
           <p className="text-sm" style={{ color: "var(--text-tertiary)" }}>
-            {prediction.skipReason}
+            {prediction.skipReason ?? "Insufficient data signals to generate a reliable prediction."}
           </p>
+          <p className="text-xs mt-3" style={{ color: "var(--text-tertiary)" }}>
+            Minimum required: 2 of 4 signals (form, H2H, standings, odds)
+          </p>
+        </div>
+      )}
+
+      {/* Limited data warning — predictions still shown but flagged */}
+      {prediction.canPredict && prediction.dataQuality.overallScore < 0.6 && (
+        <div
+          className="rounded-md p-4 mb-8 border flex items-start gap-3"
+          style={{
+            background: "rgba(245, 158, 11, 0.06)",
+            borderColor: "rgba(245, 158, 11, 0.3)",
+          }}
+        >
+          <span className="text-xl flex-shrink-0">⚠</span>
+          <div>
+            <p className="font-semibold text-sm mb-1" style={{ color: "var(--conf-medium)" }}>
+              Limited Data Available
+            </p>
+            <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              This fixture has incomplete historical data. Predictions were generated
+              using available signals only. Confidence scores may be lower than usual.
+            </p>
+          </div>
         </div>
       )}
 
