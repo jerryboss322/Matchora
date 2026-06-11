@@ -239,7 +239,7 @@ export async function findAPIFootballFixtureId(
  */
 export async function pingStatsApi(): Promise<boolean> {
   try {
-    await statsFetch<unknown>("/status");
+    await statsFetch<unknown>("/timezone");
     return true;
   } catch {
     return false;
