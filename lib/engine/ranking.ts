@@ -93,7 +93,7 @@ export function assessDataQuality(params: {
     : 0;
 
   return {
-    overallScore: Math.max(0.1, Math.min(1.0, score)), // floor at 0.1 (below 0.4 = no prediction)
+    overallScore: Math.max(0.05, Math.min(1.0, score)), // floor at 0.05
     hasForm,
     hasVenueForm,
     hasH2H,
@@ -119,10 +119,16 @@ export function canGeneratePredictions(quality: DataQualityReport): boolean {
     quality.hasOdds,
   ].filter(Boolean).length;
 
-  // Hard floor: if overall quality is too low, skip entirely
-  if (quality.overallScore < 0.40) return false;
+  // Absolute floor: zero signals = nothing to work with
+  if (availableSignals === 0) return false;
 
-  return availableSignals >= 2;
+  // Hard quality floor — only skip if truly no usable data
+  if (quality.overallScore < 0.20) return false;
+
+  // 1 signal is enough for international fixtures (World Cup group stage etc.)
+  // where teams have no prior history in this competition.
+  // Confidence will be low but transparent via dataQuality warnings.
+  return availableSignals >= 1;
 }
 
 /**
