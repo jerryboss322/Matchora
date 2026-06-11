@@ -1,22 +1,23 @@
 /**
- * Match Stats API client
+ * Free API Live Football Data client (RapidAPI)
  *
- * Fetches detailed match statistics: xG, shots, possession, passes,
- * tackles, duels, discipline, physical metrics.
+ * Provides match statistics, fixtures, H2H, standings, and team form.
+ * This is a broader source than football-data.org — covers more leagues
+ * including World Cup and international competitions.
  *
- * Uses the football stats endpoint available on RapidAPI.
- * Configure STATS_API_KEY and STATS_API_HOST in your environment.
- *
- * Get your key at: https://rapidapi.com
+ * Base URL: https://free-api-live-football-data.p.rapidapi.com
+ * Get key at: https://rapidapi.com/Creativesdev/api/free-api-live-football-data
  */
 
 import type { FixtureStats, MatchStatGroup, MatchStatItem } from "@/types";
 
-const BASE_URL = "https://api-football-v1.p.rapidapi.com/v3";
+const BASE_URL = "https://free-api-live-football-data.p.rapidapi.com";
 
 function getCredentials(): { key: string; host: string } {
   const key = process.env.STATS_API_KEY;
-  const host = process.env.STATS_API_HOST ?? "api-football-v1.p.rapidapi.com";
+  const host =
+    process.env.STATS_API_HOST ??
+    "free-api-live-football-data.p.rapidapi.com";
   if (!key) throw new Error("STATS_API_KEY is not configured");
   return { key, host };
 }
@@ -27,10 +28,11 @@ async function statsFetch<T>(path: string): Promise<T> {
 
   const res = await fetch(url, {
     headers: {
+      "Content-Type": "application/json",
       "x-rapidapi-key": key,
       "x-rapidapi-host": host,
     },
-    next: { revalidate: 1800 }, // stats refresh every 30 minutes
+    next: { revalidate: 1800 },
   });
 
   if (!res.ok) {
@@ -43,154 +45,123 @@ async function statsFetch<T>(path: string): Promise<T> {
 
 // ─── Raw API shapes ────────────────────────────────────────────────────────────
 
-interface APIFootballStatsResponse {
-  response: Array<{
-    team: { id: number; name: string };
-    statistics: Array<{
-      type: string;
-      value: string | number | null;
-    }>;
-  }>;
+interface RawStatItem {
+  type: string;
+  home: string | number | null;
+  away: string | number | null;
 }
 
-interface APIFootballFixtureResponse {
-  response: Array<{
-    fixture: {
-      id: number;
+interface RawStatsResponse {
+  status: string;
+  response?: {
+    stats?: RawStatItem[];
+  };
+}
+
+interface RawFixturesByDate {
+  status: string;
+  response?: {
+    events?: Array<{
+      id: string;
+      homeTeam: { id: string; name: string };
+      awayTeam: { id: string; name: string };
+      league: { id: string; name: string };
       date: string;
-      status: { short: string };
-    };
-    teams: {
-      home: { id: number; name: string };
-      away: { id: number; name: string };
-    };
-    goals: { home: number | null; away: number | null };
-  }>;
+      time: string;
+      status: string;
+    }>;
+  };
 }
 
-// ─── Mappers ───────────────────────────────────────────────────────────────────
+// ─── Stat grouping ─────────────────────────────────────────────────────────────
 
-/**
- * Map API-Football statistics array into our grouped MatchStatGroup format.
- * Groups stats by category for display.
- */
-function mapToStatGroups(
-  homeStats: Array<{ type: string; value: string | number | null }>,
-  awayStats: Array<{ type: string; value: string | number | null }>
-): MatchStatGroup[] {
-  // Build a map of stat type → { home, away }
-  const awayMap = new Map(awayStats.map((s) => [s.type, s.value]));
+const STAT_GROUPS: Record<string, string> = {
+  "Ball Possession": "top_stats",
+  "Total Shots": "shots",
+  "Shots on Goal": "shots",
+  "Shots off Goal": "shots",
+  "Blocked Shots": "shots",
+  "Shots insidebox": "shots",
+  "Shots outsidebox": "shots",
+  "expected_goals": "top_stats",
+  "Total passes": "passes",
+  "Passes accurate": "passes",
+  "Passes %": "passes",
+  "Fouls": "defence",
+  "Yellow Cards": "defence",
+  "Red Cards": "defence",
+  "Goalkeeper Saves": "defence",
+  "Corner Kicks": "other",
+  "Offsides": "other",
+};
 
-  // Categorize stats into groups
-  const shotKeys = [
-    "Total Shots", "Shots on Goal", "Shots off Goal",
-    "Blocked Shots", "Shots insidebox", "Shots outsidebox",
-  ];
-  const possessionKeys = ["Ball Possession"];
-  const xgKeys = ["expected_goals"];
-  const passKeys = [
-    "Total passes", "Passes accurate", "Passes %",
-  ];
-  const defenceKeys = [
-    "Fouls", "Yellow Cards", "Red Cards",
-    "Goalkeeper Saves", "Total Duels", "Duels Won",
-  ];
-  const otherKeys = ["Corner Kicks", "Offsides"];
-
-  const groups: MatchStatGroup[] = [
-    { title: "Top Stats", key: "top_stats", stats: [] },
-    { title: "Shots", key: "shots", stats: [] },
-    { title: "Passes", key: "passes", stats: [] },
-    { title: "Defence", key: "defence", stats: [] },
-    { title: "Other", key: "other", stats: [] },
-  ];
-
-  const groupMap: Record<string, MatchStatGroup> = {
-    top_stats: groups[0],
-    shots: groups[1],
-    passes: groups[2],
-    defence: groups[3],
-    other: groups[4],
+function mapStats(stats: RawStatItem[]): MatchStatGroup[] {
+  const groups: Record<string, MatchStatGroup> = {
+    top_stats: { title: "Top Stats", key: "top_stats", stats: [] },
+    shots: { title: "Shots", key: "shots", stats: [] },
+    passes: { title: "Passes", key: "passes", stats: [] },
+    defence: { title: "Defence", key: "defence", stats: [] },
+    other: { title: "Other", key: "other", stats: [] },
   };
 
-  for (const stat of homeStats) {
-    const away = awayMap.get(stat.type) ?? null;
-    const homeVal = stat.value;
+  for (const stat of stats) {
+    const homeNum =
+      typeof stat.home === "string" ? parseFloat(stat.home) : stat.home;
+    const awayNum =
+      typeof stat.away === "string" ? parseFloat(stat.away) : stat.away;
 
-    // Determine highlighted winner
-    const homeNum = typeof homeVal === "string" ? parseFloat(homeVal) : homeVal;
-    const awayNum = typeof away === "string" ? parseFloat(String(away)) : away;
     let highlighted: "home" | "away" | "equal" = "equal";
-    if (homeNum !== null && awayNum !== null && !isNaN(homeNum) && !isNaN(awayNum)) {
-      if (homeNum > awayNum) highlighted = "home";
-      else if (awayNum > homeNum) highlighted = "away";
+    if (
+      homeNum !== null &&
+      awayNum !== null &&
+      !isNaN(homeNum as number) &&
+      !isNaN(awayNum as number)
+    ) {
+      if ((homeNum as number) > (awayNum as number)) highlighted = "home";
+      else if ((awayNum as number) > (homeNum as number)) highlighted = "away";
     }
 
     const item: MatchStatItem = {
       title: stat.type,
       key: stat.type.toLowerCase().replace(/\s+/g, "_"),
-      home: homeVal,
-      away,
+      home: stat.home,
+      away: stat.away,
       highlighted,
-      type: "text",
+      type: stat.type === "Ball Possession" ? "graph" : "text",
     };
 
-    // Route to the right group
-    if (shotKeys.includes(stat.type)) {
-      groupMap.shots.stats.push(item);
-      // Also add key shots to top_stats
-      if (["Total Shots", "Shots on Goal"].includes(stat.type)) {
-        groupMap.top_stats.stats.push(item);
-      }
-    } else if (possessionKeys.includes(stat.type)) {
-      groupMap.top_stats.stats.push({ ...item, type: "graph" });
-    } else if (xgKeys.includes(stat.type)) {
-      groupMap.top_stats.stats.push(item);
-    } else if (passKeys.includes(stat.type)) {
-      groupMap.passes.stats.push(item);
-    } else if (defenceKeys.includes(stat.type)) {
-      groupMap.defence.stats.push(item);
-    } else {
-      groupMap.other.stats.push(item);
-    }
+    const groupKey = STAT_GROUPS[stat.type] ?? "other";
+    groups[groupKey].stats.push(item);
   }
 
-  // Remove empty groups
-  return groups.filter((g) => g.stats.length > 0);
+  return Object.values(groups).filter((g) => g.stats.length > 0);
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Fetch match statistics for a completed or live fixture.
- * Requires the API-Football fixture ID (numeric).
- *
- * Returns null if stats are not yet available (pre-match).
+ * Fetch all match statistics by event ID.
+ * eventId comes from this same API's fixture list.
  */
 export async function getMatchStats(
-  fixtureId: number
+  eventId: number
 ): Promise<FixtureStats | null> {
   try {
-    const data = await statsFetch<APIFootballStatsResponse>(
-      `/fixtures/statistics?fixture=${fixtureId}`
+    const data = await statsFetch<RawStatsResponse>(
+      `/football-get-match-event-all-stats?eventid=${eventId}`
     );
 
-    if (!data.response || data.response.length < 2) return null;
+    if (data.status !== "success" || !data.response?.stats?.length) {
+      return null;
+    }
 
-    const homeTeam = data.response[0];
-    const awayTeam = data.response[1];
-
-    const groups = mapToStatGroups(
-      homeTeam.statistics,
-      awayTeam.statistics
-    );
-
+    const groups = mapStats(data.response.stats);
     if (groups.length === 0) return null;
 
     return {
-      fixtureId: String(fixtureId),
-      homeTeamName: homeTeam.team.name,
-      awayTeamName: awayTeam.team.name,
+      fixtureId: String(eventId),
+      homeTeamName: "",
+      awayTeamName: "",
       groups,
       fetchedAt: new Date().toISOString(),
     };
@@ -200,18 +171,19 @@ export async function getMatchStats(
 }
 
 /**
- * Search for an API-Football fixture ID by date and team names.
- * Used to cross-reference football-data.org fixtures with API-Football.
+ * Find event ID by date from this API's fixture list.
  */
-export async function findAPIFootballFixtureId(
+export async function findEventId(
   homeTeamName: string,
   awayTeamName: string,
   date: string // YYYY-MM-DD
 ): Promise<number | null> {
   try {
-    const data = await statsFetch<APIFootballFixtureResponse>(
-      `/fixtures?date=${date}`
+    const data = await statsFetch<RawFixturesByDate>(
+      `/football-get-matches-by-date?date=${date}`
     );
+
+    if (data.status !== "success" || !data.response?.events) return null;
 
     const normalize = (s: string) =>
       s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
@@ -219,13 +191,16 @@ export async function findAPIFootballFixtureId(
     const normHome = normalize(homeTeamName);
     const normAway = normalize(awayTeamName);
 
-    for (const item of data.response) {
-      const h = normalize(item.teams.home.name);
-      const a = normalize(item.teams.away.name);
-      // Token overlap matching
-      const homeMatch = h.split(" ").some((t) => normHome.includes(t) && t.length > 3);
-      const awayMatch = a.split(" ").some((t) => normAway.includes(t) && t.length > 3);
-      if (homeMatch && awayMatch) return item.fixture.id;
+    for (const event of data.response.events) {
+      const h = normalize(event.homeTeam.name);
+      const a = normalize(event.awayTeam.name);
+      const homeMatch = h.split(" ").some(
+        (t) => normHome.includes(t) && t.length > 3
+      );
+      const awayMatch = a.split(" ").some(
+        (t) => normAway.includes(t) && t.length > 3
+      );
+      if (homeMatch && awayMatch) return parseInt(event.id, 10);
     }
 
     return null;
@@ -235,12 +210,14 @@ export async function findAPIFootballFixtureId(
 }
 
 /**
- * Ping the stats API.
+ * Ping — use the popular leagues endpoint, lightweight and always available.
  */
 export async function pingStatsApi(): Promise<boolean> {
   try {
-    await statsFetch<unknown>("/timezone");
-    return true;
+    const data = await statsFetch<{ status: string }>(
+      "/football-get-popular-leagues"
+    );
+    return data.status === "success";
   } catch {
     return false;
   }

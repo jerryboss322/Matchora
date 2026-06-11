@@ -203,20 +203,35 @@ function mapEvent(event: OddsApiEvent): FixtureOdds {
 
 // ─── Public API ────────────────────────────────────────────────────────────────
 
+// Priority sport keys — World Cup and major international competitions first
+const PRIORITY_SPORT_KEYS = [
+  "soccer_fifa_world_cup",
+  "soccer_conmebol_copa_america",
+  "soccer_uefa_european_championship",
+  "soccer_africa_cup_of_nations",
+  "soccer_concacaf_gold_cup",
+  "soccer_uefa_nations_league",
+];
+
 /**
- * Fetch all upcoming soccer odds events for a given date.
+ * Fetch all upcoming soccer odds events.
+ * Prioritizes World Cup and international competitions, then adds top club leagues.
  * Returns all events the API provides — caller filters by fixture.
  */
 export async function getUpcomingSoccerOdds(): Promise<FixtureOdds[]> {
-  // Get all active soccer sports first, then fetch odds for soccer
+  // Get all active soccer sports
   const sports = await oddsApiFetch<OddsApiSport[]>("/sports?all=false");
-  const soccerSports = sports
+  const activeSoccerKeys = sports
     .filter((s) => s.group.toLowerCase() === "soccer" && s.active)
     .map((s) => s.key);
 
-  // For the most common leagues we know the sport key directly;
-  // fallback to generic soccer_* prefix
-  const oddsPromises = soccerSports.slice(0, 5).map((sportKey) =>
+  // Put priority keys first (World Cup etc.), then remaining active keys
+  const prioritized = [
+    ...PRIORITY_SPORT_KEYS.filter((k) => activeSoccerKeys.includes(k)),
+    ...activeSoccerKeys.filter((k) => !PRIORITY_SPORT_KEYS.includes(k)),
+  ].slice(0, 10); // fetch up to 10 sport keys
+
+  const oddsPromises = prioritized.map((sportKey) =>
     oddsApiFetch<OddsApiEvent[]>(
       `/sports/${sportKey}/odds?regions=${REGIONS}&markets=${MARKETS}&oddsFormat=decimal`
     ).catch(() => [] as OddsApiEvent[])

@@ -203,7 +203,7 @@ export default async function SettingsPage() {
               },
               {
                 key: "STATS_API_HOST",
-                desc: "RapidAPI host for stats (default: api-football-v1.p.rapidapi.com)",
+                desc: "RapidAPI host for stats (default: free-api-live-football-data.p.rapidapi.com)",
                 required: false,
               },
               {
