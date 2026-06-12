@@ -5,7 +5,7 @@ export const revalidate = 0;
 async function ss(path: string) {
   const key = process.env.STATS_API_KEY ?? "";
   const host = process.env.STATS_API_HOST ?? "sofascore.p.rapidapi.com";
-  await new Promise(r => setTimeout(r, 400));
+  await new Promise(r => setTimeout(r, 500));
   const res = await fetch(`https://sofascore.p.rapidapi.com${path}`, {
     headers: {
       "Content-Type": "application/json",
@@ -20,21 +20,20 @@ async function ss(path: string) {
   return {
     endpoint: path,
     status: res.status,
-    preview: JSON.stringify(body).slice(0, 600),
+    preview: JSON.stringify(body).slice(0, 1000),
   };
 }
 
 export async function GET() {
   const results = [];
 
-  // Test the exact endpoints visible in the RapidAPI UI screenshot
-  // teams/get-last-matches with different param names
-  results.push(await ss(`/teams/get-last-matches?teamId=3630&pageIndex=0`));
-  results.push(await ss(`/teams/get-last-matches?id=3630&pageIndex=0`));
+  // Search for Canada football team
+  results.push(await ss(`/teams/search?name=Canada`));
+  results.push(await ss(`/teams/search?query=Canada`));
+  results.push(await ss(`/teams/search?teamName=Canada`));
 
-  // matches endpoints from the screenshot
-  results.push(await ss(`/matches/get-h2h?homeTeamId=3630&awayTeamId=3666`));
-  results.push(await ss(`/matches/get-h2h-events?customId=AbBa`));
+  // Try the default example teamId=38 to see what sport it is
+  results.push(await ss(`/teams/get-last-matches?teamId=38&pageIndex=0`));
 
   return NextResponse.json({ results });
 }
