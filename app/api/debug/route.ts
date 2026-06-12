@@ -1,7 +1,7 @@
 /**
  * GET /api/debug
- * Temporary debug endpoint — remove before production.
- * Tests Sofascore API responses to verify correct endpoint paths.
+ * Tests correct Sofascore endpoint paths based on known category IDs.
+ * Canada = category 388, Bosnia = category 158
  */
 
 import { NextResponse } from "next/server";
@@ -9,36 +9,45 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const revalidate = 0;
 
-async function sofascoreFetch(path: string) {
-  const key = process.env.STATS_API_KEY;
+async function ss(path: string) {
+  const key = process.env.STATS_API_KEY ?? "";
   const host = process.env.STATS_API_HOST ?? "sofascore.p.rapidapi.com";
-  const url = `https://sofascore.p.rapidapi.com${path}`;
-
-  const res = await fetch(url, {
+  const res = await fetch(`https://sofascore.p.rapidapi.com${path}`, {
     headers: {
       "Content-Type": "application/json",
-      "x-rapidapi-key": key ?? "",
+      "x-rapidapi-key": key,
       "x-rapidapi-host": host,
     },
     cache: "no-store",
   });
-
   const text = await res.text();
-  let json: unknown;
-  try { json = JSON.parse(text); } catch { json = text; }
-  return { status: res.status, ok: res.ok, body: json };
+  let body: unknown;
+  try { body = JSON.parse(text); } catch { body = text.slice(0, 200); }
+  // Truncate large responses
+  const str = JSON.stringify(body);
+  return {
+    endpoint: path,
+    status: res.status,
+    ok: res.ok,
+    preview: str.slice(0, 500),
+  };
 }
 
 export async function GET() {
   const today = new Date().toISOString().split("T")[0];
 
-  // Test multiple endpoints to find which ones work
   const results = await Promise.all([
-    sofascoreFetch("/categories/list?sport=football").then(r => ({ endpoint: "/categories/list", ...r })).catch(e => ({ endpoint: "/categories/list", error: String(e) })),
-    sofascoreFetch(`/matches/list-by-date?date=${today}&timezone=UTC`).then(r => ({ endpoint: "/matches/list-by-date", ...r })).catch(e => ({ endpoint: "/matches/list-by-date", error: String(e) })),
-    sofascoreFetch(`/search?query=Canada&sport=football`).then(r => ({ endpoint: "/search?query=Canada", ...r })).catch(e => ({ endpoint: "/search?query=Canada", error: String(e) })),
-    sofascoreFetch(`/teams/get-last-matches?teamId=4166&page=0`).then(r => ({ endpoint: "/teams/get-last-matches?teamId=4166", ...r })).catch(e => ({ endpoint: "/teams/get-last-matches", error: String(e) })),
+    // Try events by date — different path variants
+    ss(`/events/live`),
+    ss(`/sport/football/events/live`),
+    ss(`/sport/1/events/${today}`),
+    ss(`/football/events/${today}`),
+    // Try category tournaments (Canada = 388)
+    ss(`/category/388/tournaments`),
+    // Try team last events with correct ID format
+    ss(`/team/4166/events/last/0`),
+    ss(`/teams/4166/events/last/0`),
   ]);
 
-  return NextResponse.json({ results });
+  return NextResponse.json({ today, results });
 }
