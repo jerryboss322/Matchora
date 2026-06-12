@@ -306,15 +306,77 @@ export async function findMatchId(
 }
 
 /**
- * Find Sofascore team ID by name.
+ * Find Sofascore team ID by name using the search endpoint.
+ * Tries multiple response shapes since Sofascore's API shape varies.
  */
 export async function findTeamId(teamName: string): Promise<number | null> {
   try {
-    const data = await sofascoreFetch<{ teams?: Array<{ id: number; name: string }> }>(
+    const data = await sofascoreFetch<Record<string, unknown>>(
       `/search?query=${encodeURIComponent(teamName)}&sport=football`
     );
-    const results = (data as any)?.results?.teams?.hits ?? [];
-    return results[0]?.entity?.id ?? null;
+
+    // Try multiple possible response shapes
+    const d = data as any;
+
+    // Shape 1: { results: { teams: { hits: [{ entity: { id } }] } } }
+    const hits1 = d?.results?.teams?.hits ?? [];
+    if (hits1.length > 0) return hits1[0]?.entity?.id ?? null;
+
+    // Shape 2: { teams: [{ id }] }
+    const hits2 = d?.teams ?? [];
+    if (hits2.length > 0) return hits2[0]?.id ?? null;
+
+    // Shape 3: { data: { teams: [{ id }] } }
+    const hits3 = d?.data?.teams ?? [];
+    if (hits3.length > 0) return hits3[0]?.id ?? null;
+
+    // Shape 4: flat array
+    if (Array.isArray(d) && d.length > 0) return d[0]?.id ?? null;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find Sofascore team ID from a match event on a specific date.
+ * More reliable than name search — finds the team via fixture matching.
+ */
+export async function findTeamIdFromFixture(
+  teamName: string,
+  opponentName: string,
+  date: string
+): Promise<number | null> {
+  try {
+    const data = await sofascoreFetch<Record<string, unknown>>(
+      `/matches/list-by-date?date=${date}&timezone=UTC`
+    );
+    const d = data as any;
+    const events: any[] = d?.events ?? d?.data ?? [];
+
+    const normalize = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+    const normTeam = normalize(teamName);
+    const normOpp = normalize(opponentName);
+
+    for (const ev of events) {
+      const h = normalize(ev?.homeTeam?.name ?? "");
+      const a = normalize(ev?.awayTeam?.name ?? "");
+      const teamMatch =
+        h.split(" ").some((t: string) => normTeam.includes(t) && t.length > 3) ||
+        a.split(" ").some((t: string) => normTeam.includes(t) && t.length > 3);
+      const oppMatch =
+        h.split(" ").some((t: string) => normOpp.includes(t) && t.length > 3) ||
+        a.split(" ").some((t: string) => normOpp.includes(t) && t.length > 3);
+
+      if (teamMatch && oppMatch) {
+        // Return the correct team's ID
+        const hMatch = h.split(" ").some((t: string) => normTeam.includes(t) && t.length > 3);
+        return hMatch ? ev?.homeTeam?.id ?? null : ev?.awayTeam?.id ?? null;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
