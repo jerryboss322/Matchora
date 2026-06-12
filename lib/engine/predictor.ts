@@ -4,7 +4,10 @@
  * Coordinates all data sources and engine modules to produce
  * a complete FixturePrediction for a given fixture.
  *
- * This is the single entry point for the prediction pipeline.
+ * Data source priority:
+ * 1. football-data.org (primary — form, H2H, standings)
+ * 2. Sofascore via RapidAPI (fallback — form, H2H, stats)
+ * 3. The Odds API (odds + implied probabilities)
  */
 
 import type {
@@ -17,68 +20,132 @@ import {
   getTeamRecentResults,
   getHeadToHead,
   getStandings,
-  SUPPORTED_COMPETITIONS,
 } from "@/lib/api/football-data";
 import { getUpcomingSoccerOdds, matchFixtureToOdds } from "@/lib/api/odds-api";
+import {
+  getTeamRecentResultsSS,
+  getH2HSofascore,
+  findMatchId,
+  findTeamId,
+} from "@/lib/api/sofascore";
 import { computeTeamForm, computeVenueForm } from "@/lib/engine/form";
 import { computeH2H } from "@/lib/engine/h2h";
 import { generateAllPredictions, PublicEngineInput } from "@/lib/engine/confidence";
-import { assessDataQuality, canGeneratePredictions, rankPredictions } from "@/lib/engine/ranking";
+import {
+  assessDataQuality,
+  canGeneratePredictions,
+  rankPredictions,
+} from "@/lib/engine/ranking";
 
 /**
  * Generate a full prediction for a single fixture.
- * All data is fetched fresh from approved APIs.
+ * Falls back to Sofascore when football-data.org lacks data
+ * (common for international fixtures, World Cup, friendlies).
  */
 export async function predictFixture(
   fixture: Fixture
 ): Promise<FixturePrediction> {
-  // Only football-data fixtures have full data access
-  if (fixture.source !== "football-data") {
-    return skippedPrediction(
-      fixture,
-      "Detailed statistical data only available for football-data.org sourced fixtures"
-    );
-  }
-
   const homeId = fixture.homeTeam.id;
   const awayId = fixture.awayTeam.id;
   const competitionId = fixture.competition.id;
+  const kickoffDate = fixture.kickoff.split("T")[0];
 
-  // ─── Parallel data fetch ─────────────────────────────────────────────────────
-  // All fetches run concurrently; individual failures are caught gracefully.
-
+  // ─── Step 1: Primary data fetch (football-data.org) ─────────────────────────
   const [
-    homeResults,
-    awayResults,
-    h2hResults,
+    homeResultsPrimary,
+    awayResultsPrimary,
+    h2hResultsPrimary,
     standings,
     allOdds,
   ] = await Promise.all([
-    getTeamRecentResults(homeId, 12).catch(() => [] as MatchResult[]),
-    getTeamRecentResults(awayId, 12).catch(() => [] as MatchResult[]),
-    getHeadToHead(fixture.sourceId, 10).catch(() => [] as MatchResult[]),
+    fixture.source === "football-data"
+      ? getTeamRecentResults(homeId, 12).catch(() => [] as MatchResult[])
+      : Promise.resolve([] as MatchResult[]),
+    fixture.source === "football-data"
+      ? getTeamRecentResults(awayId, 12).catch(() => [] as MatchResult[])
+      : Promise.resolve([] as MatchResult[]),
+    fixture.source === "football-data"
+      ? getHeadToHead(fixture.sourceId, 10).catch(() => [] as MatchResult[])
+      : Promise.resolve([] as MatchResult[]),
     getStandings(competitionId).catch(() => null),
     getUpcomingSoccerOdds().catch(() => []),
   ]);
 
-  // ─── Form computation ─────────────────────────────────────────────────────────
+  // ─── Step 2: Sofascore fallback for missing form/H2H ────────────────────────
+  // If football-data returned no results (international fixtures etc.),
+  // try Sofascore using team name search → ID → recent matches.
+
+  let homeResults = homeResultsPrimary;
+  let awayResults = awayResultsPrimary;
+  let h2hResults = h2hResultsPrimary;
+
+  const needsFallback =
+    homeResults.length < 3 || awayResults.length < 3;
+
+  if (needsFallback) {
+    // Find Sofascore team IDs by name
+    const [ssHomeId, ssAwayId] = await Promise.all([
+      findTeamId(fixture.homeTeam.name).catch(() => null),
+      findTeamId(fixture.awayTeam.name).catch(() => null),
+    ]);
+
+    // Fetch form from Sofascore if IDs found
+    if (ssHomeId && homeResults.length < 3) {
+      const ssHomeResults = await getTeamRecentResultsSS(ssHomeId, 12).catch(
+        () => [] as MatchResult[]
+      );
+      if (ssHomeResults.length > homeResults.length) {
+        homeResults = ssHomeResults;
+      }
+    }
+
+    if (ssAwayId && awayResults.length < 3) {
+      const ssAwayResults = await getTeamRecentResultsSS(ssAwayId, 12).catch(
+        () => [] as MatchResult[]
+      );
+      if (ssAwayResults.length > awayResults.length) {
+        awayResults = ssAwayResults;
+      }
+    }
+
+    // Fetch H2H from Sofascore if both IDs found and primary H2H is empty
+    if (ssHomeId && ssAwayId && h2hResults.length === 0) {
+      h2hResults = await getH2HSofascore(ssHomeId, ssAwayId, 10).catch(
+        () => [] as MatchResult[]
+      );
+    }
+  }
+
+  // ─── Step 3: Form computation ─────────────────────────────────────────────
 
   const homeForm = computeTeamForm(homeId, fixture.homeTeam.name, homeResults);
   const awayForm = computeTeamForm(awayId, fixture.awayTeam.name, awayResults);
-  const homeVenueForm = computeVenueForm(homeId, fixture.homeTeam.name, homeResults, "home");
-  const awayVenueForm = computeVenueForm(awayId, fixture.awayTeam.name, awayResults, "away");
+  const homeVenueForm = computeVenueForm(
+    homeId,
+    fixture.homeTeam.name,
+    homeResults,
+    "home"
+  );
+  const awayVenueForm = computeVenueForm(
+    awayId,
+    fixture.awayTeam.name,
+    awayResults,
+    "away"
+  );
 
-  // ─── H2H ──────────────────────────────────────────────────────────────────────
+  // ─── Step 4: H2H ────────────────────────────────────────────────────────────
 
   const h2h = computeH2H(homeId, awayId, h2hResults);
 
-  // ─── Standings context ────────────────────────────────────────────────────────
+  // ─── Step 5: Standings context ───────────────────────────────────────────────
 
   const tableSize = standings?.table.length ?? 20;
-  const homeStanding = standings?.table.find((e) => e.team.id === homeId) ?? null;
-  const awayStanding = standings?.table.find((e) => e.team.id === awayId) ?? null;
+  const homeStanding =
+    standings?.table.find((e) => e.team.id === homeId) ?? null;
+  const awayStanding =
+    standings?.table.find((e) => e.team.id === awayId) ?? null;
 
-  // ─── Odds matching ────────────────────────────────────────────────────────────
+  // ─── Step 6: Odds matching ───────────────────────────────────────────────────
 
   const odds = matchFixtureToOdds(
     fixture.homeTeam.name,
@@ -86,7 +153,7 @@ export async function predictFixture(
     allOdds
   );
 
-  // ─── Data quality assessment ──────────────────────────────────────────────────
+  // ─── Step 7: Data quality assessment ────────────────────────────────────────
 
   const dataQuality = assessDataQuality({
     homeForm,
@@ -115,17 +182,17 @@ export async function predictFixture(
       predictions: [],
       canPredict: false,
       skipReason:
-        "Insufficient historical data to generate reliable predictions. " +
+        "Insufficient data signals to generate reliable predictions. " +
         (dataQuality.warnings[0] ?? ""),
     };
   }
 
-  // ─── Prediction generation ────────────────────────────────────────────────────
+  // ─── Step 8: Prediction generation ──────────────────────────────────────────
 
   const allPredictions = generateAllPredictions(
     {
-      homeForm: homeForm,
-      awayForm: awayForm,
+      homeForm,
+      awayForm,
       homeVenueForm,
       awayVenueForm,
       h2h,
@@ -153,37 +220,5 @@ export async function predictFixture(
     odds,
     predictions: rankedPredictions,
     canPredict: true,
-  };
-}
-
-function skippedPrediction(
-  fixture: Fixture,
-  reason: string
-): FixturePrediction {
-  return {
-    fixture,
-    generatedAt: new Date().toISOString(),
-    dataQuality: {
-      overallScore: 0,
-      hasForm: false,
-      hasVenueForm: false,
-      hasH2H: false,
-      hasStandings: false,
-      hasOdds: false,
-      formSampleSize: 0,
-      h2hSampleSize: 0,
-      warnings: [reason],
-    },
-    homeForm: null,
-    awayForm: null,
-    homeVenueForm: null,
-    awayVenueForm: null,
-    h2h: null,
-    homeStanding: null,
-    awayStanding: null,
-    odds: null,
-    predictions: [],
-    canPredict: false,
-    skipReason: reason,
   };
 }

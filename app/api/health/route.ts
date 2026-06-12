@@ -12,7 +12,7 @@ import type { ApiResponse, SystemHealth, ProviderStatus } from "@/types";
 import { pingFootballData } from "@/lib/api/football-data";
 import { pingOddsApi } from "@/lib/api/odds-api";
 import { pingSpportmonks } from "@/lib/api/sportmonks";
-import { pingStatsApi } from "@/lib/api/stats-api";
+import { pingSofascore } from "@/lib/api/sofascore";
 
 export const runtime = "nodejs";
 export const revalidate = 0; // always fresh
@@ -24,7 +24,7 @@ export async function GET(): Promise<NextResponse<ApiResponse<SystemHealth>>> {
     pingFootballData().catch(() => false),
     pingOddsApi().catch(() => false),
     pingSpportmonks().catch(() => false),
-    pingStatsApi().catch(() => false),
+    pingSofascore().catch(() => false),
   ]);
 
   const providers: ProviderStatus[] = [
@@ -59,8 +59,8 @@ export async function GET(): Promise<NextResponse<ApiResponse<SystemHealth>>> {
       }),
     },
     {
-      name: "Stats API (RapidAPI)",
-      key: "stats-api",
+      name: "Sofascore (RapidAPI)",
+      key: "sofascore",
       configured: Boolean(process.env.STATS_API_KEY),
       reachable: statsReachable,
       lastChecked: checkedAt,

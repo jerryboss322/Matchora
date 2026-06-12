@@ -198,12 +198,12 @@ export default async function SettingsPage() {
               },
               {
                 key: "STATS_API_KEY",
-                desc: "RapidAPI key for match statistics — obtain at rapidapi.com",
+                desc: "RapidAPI key — used for Sofascore (form, H2H, stats). Obtain at rapidapi.com",
                 required: true,
               },
               {
                 key: "STATS_API_HOST",
-                desc: "RapidAPI host for stats (default: free-api-live-football-data.p.rapidapi.com)",
+                desc: "RapidAPI host (default: sofascore.p.rapidapi.com)",
                 required: false,
               },
               {
