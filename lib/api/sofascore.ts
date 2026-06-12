@@ -144,7 +144,7 @@ export async function getTeamRecentResultsSS(
 ): Promise<MatchResult[]> {
   try {
     const data = await sofascoreFetch<SSTeamEventsResponse>(
-      `/teams/get-last-matches?teamId=${teamId}&pageIndex=0`
+      `/teams/get-last-matches?teamId=${teamId}&page=0`
     );
 
     return (data.events ?? [])
@@ -279,7 +279,7 @@ export async function findMatchId(
 ): Promise<number | null> {
   try {
     const data = await sofascoreFetch<SSSearchResponse>(
-      `/matches/get-matches-by-date?date=${date}&sport=football`
+      `/matches/list-by-date?date=${date}&timezone=UTC`
     );
 
     const normalize = (s: string) =>
@@ -311,23 +311,22 @@ export async function findMatchId(
 export async function findTeamId(teamName: string): Promise<number | null> {
   try {
     const data = await sofascoreFetch<{ teams?: Array<{ id: number; name: string }> }>(
-      `/teams/search?query=${encodeURIComponent(teamName)}`
+      `/search?query=${encodeURIComponent(teamName)}&sport=football`
     );
-    return data.teams?.[0]?.id ?? null;
+    const results = (data as any)?.results?.teams?.hits ?? [];
+    return results[0]?.entity?.id ?? null;
   } catch {
     return null;
   }
 }
 
 /**
- * Ping Sofascore — uses a lightweight sport categories endpoint.
+ * Ping Sofascore — uses the categories/list endpoint which is always available.
  */
 export async function pingSofascore(): Promise<boolean> {
   try {
-    const data = await sofascoreFetch<{ categories?: unknown[] }>(
-      `/matches/get-matches-by-date?date=${new Date().toISOString().split("T")[0]}&sport=football`
-    );
-    return Array.isArray((data as any).events) || true;
+    await sofascoreFetch<unknown>("/categories/list?sport=football");
+    return true;
   } catch {
     return false;
   }
