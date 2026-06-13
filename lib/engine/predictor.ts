@@ -25,9 +25,7 @@ import { getUpcomingSoccerOdds, matchFixtureToOdds } from "@/lib/api/odds-api";
 import {
   getTeamRecentResultsSS,
   getH2HSofascore,
-  findMatchId,
-  findTeamId,
-  findTeamIdFromFixture,
+  findTeamIdSS,
 } from "@/lib/api/sofascore";
 import { computeTeamForm, computeVenueForm } from "@/lib/engine/form";
 import { computeH2H } from "@/lib/engine/h2h";
@@ -84,15 +82,10 @@ export async function predictFixture(
     homeResults.length < 3 || awayResults.length < 3;
 
   if (needsFallback) {
-    // Find Sofascore team IDs — try fixture-based lookup first (more reliable),
-    // fall back to name search
+    // Find Sofascore team IDs by name search (national=true, sport=football)
     const [ssHomeId, ssAwayId] = await Promise.all([
-      findTeamIdFromFixture(fixture.homeTeam.name, fixture.awayTeam.name, kickoffDate)
-        .catch(() => null)
-        .then((id) => id ?? findTeamId(fixture.homeTeam.name).catch(() => null)),
-      findTeamIdFromFixture(fixture.awayTeam.name, fixture.homeTeam.name, kickoffDate)
-        .catch(() => null)
-        .then((id) => id ?? findTeamId(fixture.awayTeam.name).catch(() => null)),
+      findTeamIdSS(fixture.homeTeam.name).catch(() => null),
+      findTeamIdSS(fixture.awayTeam.name).catch(() => null),
     ]);
 
     // Fetch form from Sofascore if IDs found

@@ -1,21 +1,15 @@
 /**
  * Sofascore API client (via RapidAPI)
  *
- * Provides team form, H2H, match statistics, standings, and odds.
- * Replaces Sportmonks as the supplemental data source.
+ * Provides team form, H2H, and match data for international fixtures
+ * including FIFA World Cup where football-data.org has no coverage.
  *
  * Base URL: https://sofascore.p.rapidapi.com
- * Subscribe at: rapidapi.com/search → "Sofascore"
+ * Key param: STATS_API_KEY (RapidAPI key)
+ * Host param: STATS_API_HOST = sofascore.p.rapidapi.com
  */
 
-import type {
-  MatchResult,
-  HeadToHeadStats,
-  FixtureStats,
-  MatchStatGroup,
-  MatchStatItem,
-  StandingEntry,
-} from "@/types";
+import type { MatchResult, FixtureStats, MatchStatItem, MatchStatGroup } from "@/types";
 
 const BASE_URL = "https://sofascore.p.rapidapi.com";
 
@@ -28,9 +22,7 @@ function getCredentials(): { key: string; host: string } {
 
 async function sofascoreFetch<T>(path: string): Promise<T> {
   const { key, host } = getCredentials();
-  const url = `${BASE_URL}${path}`;
-
-  const res = await fetch(url, {
+  const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
       "x-rapidapi-key": key,
@@ -41,93 +33,70 @@ async function sofascoreFetch<T>(path: string): Promise<T> {
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Sofascore API error ${res.status} on ${path}: ${body}`);
+    throw new Error(`Sofascore ${res.status} on ${path}: ${body}`);
   }
 
   return res.json() as T;
 }
 
-// ─── Raw API shapes ────────────────────────────────────────────────────────────
+// ─── Raw shapes ────────────────────────────────────────────────────────────────
+
+interface SSTeam {
+  id: number;
+  name: string;
+  nameCode?: string;
+  national?: boolean;
+  sport?: { id: number; slug: string };
+}
 
 interface SSEvent {
   id: number;
-  slug?: string;
-  startTimestamp: number;
-  status?: { type: string };
-  homeScore?: { current?: number };
-  awayScore?: { current?: number };
-  homeTeam: { id: number; name: string };
-  awayTeam: { id: number; name: string };
-  tournament?: { name: string };
+  startTimestamp?: number;
+  status?: { type?: string; description?: string };
+  homeTeam: SSTeam;
+  awayTeam: SSTeam;
+  homeScore?: { current?: number; display?: number };
+  awayScore?: { current?: number; display?: number };
+  tournament?: { name?: string };
+  winnerCode?: number; // 1=home, 2=away, 3=draw
 }
 
 interface SSTeamEventsResponse {
   events?: SSEvent[];
 }
 
-interface SSH2HResponse {
-  events?: SSEvent[];
-  homeTeam?: { id: number; name: string };
-  awayTeam?: { id: number; name: string };
-}
-
-interface SSStatisticsResponse {
-  statistics?: Array<{
-    period: string;
-    groups: Array<{
-      groupName: string;
-      statisticsItems: Array<{
-        name: string;
-        home: string;
-        away: string;
-        homeValue?: number;
-        awayValue?: number;
-      }>;
-    }>;
-  }>;
-}
-
-interface SSStandingsResponse {
-  standings?: Array<{
-    rows?: Array<{
-      position: number;
-      team: { id: number; name: string; shortName?: string };
-      matches: number;
-      wins: number;
-      draws: number;
-      losses: number;
-      scoresFor: number;
-      scoresAgainst: number;
-      points: number;
-    }>;
-  }>;
-}
-
 interface SSSearchResponse {
-  events?: SSEvent[];
+  teams?: SSTeam[];
 }
 
-// ─── Mappers ───────────────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
-function mapEventToResult(
-  event: SSEvent,
-  teamId: number
-): MatchResult | null {
-  if (
-    event.homeScore?.current === undefined ||
-    event.awayScore?.current === undefined
-  )
-    return null;
+function isFinished(event: SSEvent): boolean {
+  const type = event.status?.type?.toLowerCase() ?? "";
+  return (
+    type === "finished" ||
+    type === "ended" ||
+    type === "afterextratime" ||
+    type === "afterpenalties"
+  );
+}
 
-  const status = event.status?.type ?? "";
-  if (!["finished", "ended"].includes(status.toLowerCase())) return null;
+function mapEventToResult(event: SSEvent): MatchResult | null {
+  if (!isFinished(event)) return null;
+
+  const homeGoals = event.homeScore?.current ?? event.homeScore?.display;
+  const awayGoals = event.awayScore?.current ?? event.awayScore?.display;
+
+  if (homeGoals === undefined || awayGoals === undefined) return null;
 
   return {
-    date: new Date(event.startTimestamp * 1000).toISOString(),
+    date: event.startTimestamp
+      ? new Date(event.startTimestamp * 1000).toISOString()
+      : new Date().toISOString(),
     homeTeamId: event.homeTeam.id,
     awayTeamId: event.awayTeam.id,
-    homeGoals: event.homeScore.current,
-    awayGoals: event.awayScore.current,
+    homeGoals,
+    awayGoals,
     competition: event.tournament?.name ?? "Unknown",
   };
 }
@@ -135,29 +104,74 @@ function mapEventToResult(
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Get recent results for a team (last N matches).
- * Uses the team's recent events endpoint.
+ * Find Sofascore team ID by name.
+ * Uses the deprecated teams/search endpoint which still works.
+ * Filters to football (sport id=1) national teams preferentially.
+ */
+export async function findTeamIdSS(teamName: string): Promise<number | null> {
+  try {
+    const data = await sofascoreFetch<SSSearchResponse>(
+      `/teams/search?name=${encodeURIComponent(teamName)}`
+    );
+
+    const teams = data.teams ?? [];
+    if (teams.length === 0) return null;
+
+    // Prefer: football + national team
+    const footballNational = teams.find(
+      (t) => t.sport?.id === 1 && t.national === true
+    );
+    if (footballNational) return footballNational.id;
+
+    // Fallback: any football team
+    const football = teams.find((t) => t.sport?.id === 1);
+    if (football) return football.id;
+
+    return teams[0].id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get a team's last N completed matches.
+ * Returns results usable by the form engine.
  */
 export async function getTeamRecentResultsSS(
   teamId: number,
   limit = 10
 ): Promise<MatchResult[]> {
   try {
-    const data = await sofascoreFetch<SSTeamEventsResponse>(
-      `/teams/get-last-matches?teamId=${teamId}&page=0`
-    );
+    const results: MatchResult[] = [];
+    let page = 0;
 
-    return (data.events ?? [])
-      .map((e) => mapEventToResult(e, teamId))
-      .filter((r): r is MatchResult => r !== null)
-      .slice(0, limit);
+    // Fetch up to 2 pages to get enough results
+    while (results.length < limit && page < 2) {
+      const data = await sofascoreFetch<SSTeamEventsResponse>(
+        `/teams/get-last-matches?teamId=${teamId}&pageIndex=${page}`
+      );
+
+      const events = data.events ?? [];
+      if (events.length === 0) break;
+
+      for (const event of events) {
+        const result = mapEventToResult(event);
+        if (result) results.push(result);
+        if (results.length >= limit) break;
+      }
+
+      page++;
+    }
+
+    return results;
   } catch {
     return [];
   }
 }
 
 /**
- * Get head-to-head results between two teams.
+ * Get H2H results between two teams using their Sofascore IDs.
+ * Uses teams/get-last-matches for each team and finds overlapping matches.
  */
 export async function getH2HSofascore(
   teamId1: number,
@@ -165,230 +179,39 @@ export async function getH2HSofascore(
   limit = 10
 ): Promise<MatchResult[]> {
   try {
-    const data = await sofascoreFetch<SSH2HResponse>(
-      `/matches/get-h2h?homeTeamId=${teamId1}&awayTeamId=${teamId2}`
+    // Fetch last matches for team1 and filter for ones involving team2
+    const data = await sofascoreFetch<SSTeamEventsResponse>(
+      `/teams/get-last-matches?teamId=${teamId1}&pageIndex=0`
     );
 
-    return (data.events ?? [])
-      .map((e) => mapEventToResult(e, teamId1))
-      .filter((r): r is MatchResult => r !== null)
-      .slice(0, limit);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Get match statistics for a completed/live fixture.
- */
-export async function getMatchStatsSofascore(
-  matchId: number
-): Promise<FixtureStats | null> {
-  try {
-    const data = await sofascoreFetch<SSStatisticsResponse>(
-      `/matches/get-statistics?matchId=${matchId}`
-    );
-
-    if (!data.statistics?.length) return null;
-
-    // Use ALL period stats (full match)
-    const allPeriod = data.statistics.find(
-      (s) => s.period === "ALL" || s.period === "all"
-    ) ?? data.statistics[0];
-
-    if (!allPeriod) return null;
-
-    const groups: MatchStatGroup[] = allPeriod.groups.map((group) => ({
-      title: group.groupName,
-      key: group.groupName.toLowerCase().replace(/\s+/g, "_"),
-      stats: group.statisticsItems.map((item) => {
-        const hv = item.homeValue ?? parseFloat(item.home) ?? 0;
-        const av = item.awayValue ?? parseFloat(item.away) ?? 0;
-        const highlighted: "home" | "away" | "equal" =
-          hv > av ? "home" : av > hv ? "away" : "equal";
-
-        const stat: MatchStatItem = {
-          title: item.name,
-          key: item.name.toLowerCase().replace(/\s+/g, "_"),
-          home: item.home,
-          away: item.away,
-          highlighted,
-          type: item.name.toLowerCase().includes("possession")
-            ? "graph"
-            : "text",
-        };
-        return stat;
-      }),
-    }));
-
-    return {
-      fixtureId: String(matchId),
-      homeTeamName: "",
-      awayTeamName: "",
-      groups,
-      fetchedAt: new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get standings for a tournament season.
- */
-export async function getStandingsSofascore(
-  tournamentId: number,
-  seasonId: number
-): Promise<StandingEntry[]> {
-  try {
-    const data = await sofascoreFetch<SSStandingsResponse>(
-      `/tournaments/get-standings?tournamentId=${tournamentId}&seasonId=${seasonId}`
-    );
-
-    const table = data.standings?.[0]?.rows ?? [];
-
-    return table.map((row) => ({
-      position: row.position,
-      team: {
-        id: row.team.id,
-        name: row.team.name,
-        shortName: row.team.shortName,
-      },
-      played: row.matches,
-      won: row.wins,
-      draw: row.draws,
-      lost: row.losses,
-      goalsFor: row.scoresFor,
-      goalsAgainst: row.scoresAgainst,
-      goalDifference: row.scoresFor - row.scoresAgainst,
-      points: row.points,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Search for a match event by team names and date.
- * Returns the Sofascore match ID for use with stats/odds endpoints.
- */
-export async function findMatchId(
-  homeTeamName: string,
-  awayTeamName: string,
-  date: string // YYYY-MM-DD
-): Promise<number | null> {
-  try {
-    const data = await sofascoreFetch<SSSearchResponse>(
-      `/matches/list-by-date?date=${date}&timezone=UTC`
-    );
-
-    const normalize = (s: string) =>
-      s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-
-    const normHome = normalize(homeTeamName);
-    const normAway = normalize(awayTeamName);
-
+    const h2h: MatchResult[] = [];
     for (const event of data.events ?? []) {
-      const h = normalize(event.homeTeam.name);
-      const a = normalize(event.awayTeam.name);
-      const homeMatch = h.split(" ").some(
-        (t) => normHome.includes(t) && t.length > 3
-      );
-      const awayMatch = a.split(" ").some(
-        (t) => normAway.includes(t) && t.length > 3
-      );
-      if (homeMatch && awayMatch) return event.id;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
+      const isH2H =
+        (event.homeTeam.id === teamId1 && event.awayTeam.id === teamId2) ||
+        (event.homeTeam.id === teamId2 && event.awayTeam.id === teamId1);
 
-/**
- * Find Sofascore team ID by name using the search endpoint.
- * Tries multiple response shapes since Sofascore's API shape varies.
- */
-export async function findTeamId(teamName: string): Promise<number | null> {
-  try {
-    const data = await sofascoreFetch<Record<string, unknown>>(
-      `/search?query=${encodeURIComponent(teamName)}&sport=football`
-    );
-
-    // Try multiple possible response shapes
-    const d = data as any;
-
-    // Shape 1: { results: { teams: { hits: [{ entity: { id } }] } } }
-    const hits1 = d?.results?.teams?.hits ?? [];
-    if (hits1.length > 0) return hits1[0]?.entity?.id ?? null;
-
-    // Shape 2: { teams: [{ id }] }
-    const hits2 = d?.teams ?? [];
-    if (hits2.length > 0) return hits2[0]?.id ?? null;
-
-    // Shape 3: { data: { teams: [{ id }] } }
-    const hits3 = d?.data?.teams ?? [];
-    if (hits3.length > 0) return hits3[0]?.id ?? null;
-
-    // Shape 4: flat array
-    if (Array.isArray(d) && d.length > 0) return d[0]?.id ?? null;
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Find Sofascore team ID from a match event on a specific date.
- * More reliable than name search — finds the team via fixture matching.
- */
-export async function findTeamIdFromFixture(
-  teamName: string,
-  opponentName: string,
-  date: string
-): Promise<number | null> {
-  try {
-    const data = await sofascoreFetch<Record<string, unknown>>(
-      `/matches/list-by-date?date=${date}&timezone=UTC`
-    );
-    const d = data as any;
-    const events: any[] = d?.events ?? d?.data ?? [];
-
-    const normalize = (s: string) =>
-      s.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-    const normTeam = normalize(teamName);
-    const normOpp = normalize(opponentName);
-
-    for (const ev of events) {
-      const h = normalize(ev?.homeTeam?.name ?? "");
-      const a = normalize(ev?.awayTeam?.name ?? "");
-      const teamMatch =
-        h.split(" ").some((t: string) => normTeam.includes(t) && t.length > 3) ||
-        a.split(" ").some((t: string) => normTeam.includes(t) && t.length > 3);
-      const oppMatch =
-        h.split(" ").some((t: string) => normOpp.includes(t) && t.length > 3) ||
-        a.split(" ").some((t: string) => normOpp.includes(t) && t.length > 3);
-
-      if (teamMatch && oppMatch) {
-        // Return the correct team's ID
-        const hMatch = h.split(" ").some((t: string) => normTeam.includes(t) && t.length > 3);
-        return hMatch ? ev?.homeTeam?.id ?? null : ev?.awayTeam?.id ?? null;
+      if (isH2H) {
+        const result = mapEventToResult(event);
+        if (result) h2h.push(result);
+        if (h2h.length >= limit) break;
       }
     }
-    return null;
+
+    return h2h;
   } catch {
-    return null;
+    return [];
   }
 }
 
 /**
- * Ping Sofascore — uses the categories/list endpoint which is always available.
+ * Ping Sofascore — uses categories/list which is confirmed working.
  */
 export async function pingSofascore(): Promise<boolean> {
   try {
-    await sofascoreFetch<unknown>("/categories/list?sport=football");
-    return true;
+    const data = await sofascoreFetch<{ categories?: unknown[] }>(
+      "/categories/list?sport=football"
+    );
+    return Array.isArray((data as any).categories);
   } catch {
     return false;
   }
